@@ -1,0 +1,46 @@
+{
+  "name": "casreg-web-ui",
+  "version": "1.0.0",
+  "description": "CasReg Docker Registry Web UI - Complete Docker Hub-style interface with Dracula theme",
+  "main": "index.html",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "serve": "python3 -m http.server 8080",
+    "dev": "python3 -m http.server 8080",
+    "build": "echo 'Static build - no build process needed'",
+    "test": "echo 'No tests specified'",
+    "lint": "echo 'No linting configured'",
+    "format": "echo 'No formatting configured'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/casapps/casreg"
+  },
+  "keywords": [
+    "docker",
+    "registry",
+    "container",
+    "web-ui",
+    "dracula-theme",
+    "spa",
+    "docker-hub",
+    "oci",
+    "casreg"
+  ],
+  "author": "CasReg Team",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {},
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "browserslist": [
+    "> 1%",
+    "last 2 versions",
+    "not dead"
+  ],
+  "files": [
+    "index.html",
+    "static/"
+  ]
+}

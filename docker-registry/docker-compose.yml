@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  registry:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: docker-registry-complete
+    ports:
+      - "8081:80"
+      - "8444:443"
+    volumes:
+      - registry_data:/var/lib/registry
+      - ./database:/database
+    environment:
+      - EXTERNAL_URL=https://localhost
+      - EXTERNAL_REGISTRY_URL=https://localhost
+      - TRUST_FORWARDED_HEADERS=false
+      - DISABLE_INTERNAL_SSL=false
+      - LISTEN_PORT=8080
+      - JWT_SECRET=supersecretjwtkey123456789012345678901234567890
+    networks:
+      - registry-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+volumes:
+  registry_data:
+
+networks:
+  registry-network:
+    driver: bridge
