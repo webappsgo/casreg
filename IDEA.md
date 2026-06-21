@@ -48,6 +48,16 @@ official_site: https://github.com/webappsgo/casreg
 - Integrated support ticket system and knowledge base
 - Per-repository issue tracking
 - Management REST API (versioned, rate-limited, paginated)
+- Notification system: casreg extends the standard notification framework (SMTP, email templates, in-app inbox, and user preference controls defined in AI.md) with registry-specific event types — image pushed, scan completed with findings, quota at 80% and 100%, API token or robot account expiring within configurable lead time, replication rule failure, new support ticket comment; users control per-event whether to receive email or in-app notification only
+- Stars/favorites: users can star any public image (OCI or Incus); star count is a secondary popularity signal displayed on image detail pages and factored into Spotlight ranking
+- Image deprecation notices: maintainers can mark any image or tag as deprecated with a free-text migration message; the message is displayed prominently on the image detail page and returned as a `Deprecation` warning header on pull so CLI clients surface it automatically
+- Badge generation: embeddable shields-style badges for any public image — pull count, latest tag, scan status, signature status — returned as SVG from a stable URL for use in README files
+- Garbage collection visibility: UI and API showing current storage breakdown by org/user/registry, list of blobs eligible for deletion (ref_count = 0) with estimated reclaimable space, and a manual GC trigger available to admins
+- Pull analytics: per-image and per-tag pull statistics aggregated daily and queryable as weekly/monthly time-series; maintainers see adoption trends, admins see instance-wide totals
+- OCI artifact support beyond container images: Helm OCI charts, WebAssembly modules, and generic OCI artifacts stored and served via the same V2 API; artifact type detected from the manifest `mediaType` and displayed correctly in the UI rather than rendered as a container image
+- Namespace reservation and typosquatting protection: a configurable reserved-names list for the global registry and top-level user/org namespaces; registration of names that match reserved patterns or are close variants of protected names (configurable edit-distance threshold) is blocked with a descriptive error
+- Scheduled task visibility: UI panel and API endpoint showing last-run time and next scheduled run for all background tasks — daily Spotlight recalculation, GC sweep, scan DB update, replication sync, simplestreams index rebuild; operators use this for operational confidence without needing log access
+- Per-user dark/light/auto theme preference (dark is default; auto follows system preference) — as already defined in AI.md; unauthenticated visitors see dark by default
 
 **Non-goals (explicit):**
 - Docker Registry V1 protocol — deprecated since Docker 1.6 (2015), removed from Docker Hub, no modern client uses it; implementing it would be a security liability with zero real users
@@ -108,11 +118,11 @@ official_site: https://github.com/webappsgo/casreg
 - `User` — id, username, email (unique), bcrypt_password_hash, role, locked_until, passkey_credentials, 2fa_method, created_at
 - `Organization` — id, name (unique), visibility, owner_user_id, quota_bytes, created_at
 - `Registry` — id, org_id (nullable for personal), name, image_type (`oci` or `incus`), is_global (bool; at most one global OCI registry and one global Incus registry per casreg instance), visibility, immutable_tags, retention_policy, scan_policy, created_at
-- `Repository` — id, registry_id, name, visibility (≤ parent), description, pull_count, is_pinned (admin override for spotlight), created_at
+- `Repository` — id, registry_id, name, visibility (≤ parent), description, pull_count, is_pinned (admin override for spotlight), is_deprecated, deprecation_message, created_at
 - `Tag` — id, repository_id, name, manifest_digest, pushed_by, pushed_at, immutable
 - `Manifest` — id, repository_id, digest (sha256:…), media_type, size_bytes, config_digest, created_at
 - `Blob` — digest (PK), size_bytes, stored_at, ref_count (for deduplication GC)
-- `IncusImage` — id, registry_id, fingerprint (SHA256 of combined metadata+rootfs files, unique per registry), os, release, variant, arch, image_type (`container` or `vm`), metadata_size_bytes, rootfs_size_bytes, pull_count, is_pinned (admin override for spotlight), pushed_by, pushed_at
+- `IncusImage` — id, registry_id, fingerprint (SHA256 of combined metadata+rootfs files, unique per registry), os, release, variant, arch, image_type (`container` or `vm`), metadata_size_bytes, rootfs_size_bytes, pull_count, is_pinned (admin override for spotlight), is_deprecated, deprecation_message, pushed_by, pushed_at
 - `IncusAlias` — id, incus_image_id, name (alias string e.g. `oracle/7/default`), description
 - `IncusOperation` — id, uuid (unique), operation_type, status (`running`/`success`/`failure`), error, created_at, updated_at; short-lived, pruned after 24 hours
 - `Token` — id, user_id, name, hashed_value, scopes, expires_at, last_used_at
@@ -124,6 +134,10 @@ official_site: https://github.com/webappsgo/casreg
 - `SupportTicket` — id, reporter_user_id, assignee_user_id, status, priority, title, body, created_at
 - `ProxyCache` — id, name, upstream_url, upstream_auth_secret_ref, ttl_hours, last_synced_at
 - `ReplicationRule` — id, name, source (local or remote url), dest (local or remote url), filter_pattern, trigger (push/schedule), enabled
+- `Star` — id, user_id, resource_type (`oci_repo` or `incus_image`), resource_id, created_at; unique per (user_id, resource_type, resource_id)
+- `PullStat` — resource_type, resource_id, date (day bucket), pull_count; daily aggregation used for time-series analytics and rolling-window Most Pulled ranking
+- `Notification` — id, user_id, event_type, resource_type, resource_id, message, read, created_at; in-app inbox entries; casreg-specific event types extend the base framework defined in AI.md
+- `ReservedNamespace` — id, pattern, match_type (`exact` or `glob`), reason, created_by (admin user id), created_at; names matching any reserved pattern are blocked from registration
 
 ### Trust boundaries & external services
 
@@ -202,6 +216,7 @@ official_site: https://github.com/webappsgo/casreg
 | Manifest injection (YAML/JSON fields) | Manifests parsed with strict schema validation; all string fields are stored as opaque values, never interpolated |
 | Secret leakage in image layers | Trufflehog-based secret scanning on push; result surfaced in scan report; policy gate can block pull |
 | Quota exhaustion by one org/user | Per-user, per-org, per-registry, and per-repo hard quota limits with configurable grace periods |
+| Namespace squatting / typosquatting | ReservedNamespace patterns block registration of names that match or closely resemble protected global names; configurable edit-distance threshold for fuzzy matching |
 | Audit log tampering | AuditLog table has no UPDATE or DELETE grants in the ORM layer; application code only calls INSERT |
 | Forged HMAC on webhooks | Outgoing webhooks signed with HMAC-SHA256 using a per-hook secret; receivers advised to verify |
 | JWT secret compromise | JWT secret is auto-generated on first run if not set; minimum 256 bits enforced; never logged |
