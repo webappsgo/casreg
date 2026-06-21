@@ -9,7 +9,6 @@ project_org: webappsgo
 internal_name: casreg
 app_name: casreg
 official_site: https://github.com/webappsgo/casreg
-plist_name: io.github.webappsgo.casreg
 
 ## Business logic
 
@@ -32,12 +31,12 @@ plist_name: io.github.webappsgo.casreg
 - Immutable append-only audit log with JSON/CSV export
 - Integrated support ticket system and knowledge base
 - Per-repository issue tracking
-- Bubbletea TUI CLI with XDG-compliant config
-- casreg management REST API at `/api/v1/`
+- Interactive TUI CLI companion binary
+- Management REST API (versioned, rate-limited, paginated)
 
 **Non-goals (explicit):**
 - Docker Registry V1 protocol — deprecated since Docker 1.6 (2015), removed from Docker Hub, no modern client uses it; implementing it would be a security liability with zero real users
-- Client-side rendering (no React/Vue/Svelte/WASM) — web UI is server-side Go HTML templates only
+- Client-side rendering — web UI is server-rendered; no JavaScript framework required
 - Native mobile apps
 - Built-in CI/CD pipeline execution (use webhooks to trigger external CI)
 - Image build service (casreg stores and serves images; building them is out of scope)
@@ -189,7 +188,7 @@ plist_name: io.github.webappsgo.casreg
 - **Tag immutability is opt-in per registry** — some workflows (e.g., rolling `latest`) require mutable tags. Immutability is a per-registry setting, not a global default, to avoid breaking standard CI workflows out of the box.
 - **SQLite in WAL mode is the default database** — chosen for zero-config first-run. Operators moving to production scale are expected to migrate to PostgreSQL. The in-app migration wizard enforces this.
 - **Docker Registry V1 protocol is explicitly excluded** — V1 uses MD5 checksums for layer verification and has no content-addressable model. Implementing it would require deliberately weakening the integrity model. All Docker clients since version 1.6 (April 2015) use V2.
-- **CGO_ENABLED=0 (fully static binary)** — eliminates entire classes of glibc/musl version mismatch vulnerabilities and allows trivial `FROM scratch` container images. All embedded libraries (Trivy, Cosign, Syft, Trufflehog equivalents) must be pure Go or statically linked at build time.
+- **Single static binary distribution** — eliminates entire classes of glibc/musl version mismatch vulnerabilities and enables minimal container images. All embedded security tools (scanner, signature verifier, SBOM generator, secret scanner) must be available without external runtime dependencies.
 - **OIDC/OAuth2 redirect URIs are admin-configured** — the allowed redirect URI list is never derived from user input. Authorization code flow only; implicit flow is disabled.
 - **SSRF protection applies to all outbound connections casreg initiates** — pull-through upstream URLs, webhook delivery targets, and OIDC discovery endpoints are all checked against an internal-IP blocklist before connection. The blocklist includes RFC 1918, loopback, link-local (169.254/16), and the AWS metadata endpoint (169.254.169.254).
 - **Passkey/WebAuthn is optional and admin-toggleable** — organizations that require FIDO2 can enforce it; those with hardware constraints can disable it. This is a UX tradeoff, not a security downgrade, because password + token auth is still available.
