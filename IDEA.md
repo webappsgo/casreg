@@ -20,11 +20,16 @@ official_site: https://github.com/webappsgo/casreg
 - Incus REST API compliance (`/1.0/images`, `/1.0/operations`, `/1.0/` server info) for authenticated push and pull
 - Simplestreams protocol for anonymous public Incus image discovery and pull
 - Public-first anonymous browsing, searching, and pulling of public registries — no account required
+- Docker Hub-style public landing page: admin-curated Spotlight/Featured section, Newest Images feed, Most Pulled leaderboard, and a global search bar with filters (image type, OS, architecture); all browsable without login
+- Image detail pages showing markdown description, available tags with digest/size/platform metadata, a copy-ready pull command, vulnerability scan summary, and signature verification status
+- Organization and user profile pages listing public registries, member count, and featured images
+- Global registry: a system-owned namespace (default name `library` for OCI images; top-level simplestreams catalog for Incus images) managed exclusively by server admins; unqualified image names resolve to it (`casreg pull alpine` → `library/alpine`; `incus image copy casreg:oracle/7/default` → global Incus catalog); admins can push directly or promote any public image from a user namespace into the global registry; admins can also spotlight any public image on the landing page without promoting it into `library`
 - OCI image push/pull with content-addressable, SHA256-verified blob storage
 - Incus image push: `lxd.tar.xz` metadata and rootfs file pair received, metadata.yaml extracted automatically to populate os/release/variant/arch/type properties; images identified by combined SHA256 fingerprint
 - Both Incus image types: container (rootfs tarball or squashfs) and VM (disk image)
-- Incus image alias management: multiple aliases per image, resolved from property combinations (os/release/variant/arch/type)
+- Incus image alias management: multiple aliases per image, scoped by namespace prefix (`{namespace}/os/release/variant`); aliases are globally unique within the casreg instance; the global Incus registry responds to unqualified aliases (no namespace prefix)
 - Async operation model for Incus push: operation ID returned immediately, client polls for completion
+- Native CLI companion (`casreg`) that speaks both OCI V2 and Incus REST directly — not a wrapper around the docker or incus CLIs; `casreg login`, `casreg push`, `casreg pull`, `casreg tag`, `casreg rm`, `casreg search` work for both image types; type is detected from the image reference format or overridden with `--type`
 - Supply-chain security: Trivy CVE scanning (Incus container images supported; VM disk images excluded — see non-goals), Cosign signature verification, SBOM generation (Syft), SLSA provenance attestation
 - Pull-through proxy cache for upstream OCI registries (Docker Hub, GHCR, Quay, gcr.io)
 - Registry-to-registry replication (push/pull sync)
@@ -37,7 +42,6 @@ official_site: https://github.com/webappsgo/casreg
 - Immutable append-only audit log with JSON/CSV export
 - Integrated support ticket system and knowledge base
 - Per-repository issue tracking
-- Interactive TUI CLI companion binary
 - Management REST API (versioned, rate-limited, paginated)
 
 **Non-goals (explicit):**
@@ -54,7 +58,7 @@ official_site: https://github.com/webappsgo/casreg
 ### Roles & permissions
 
 **System roles (global):**
-- `admin` — full system control: user management, global config, audit logs, system-wide scan policies
+- `admin` — full system control: user management, global config, audit logs, system-wide scan policies, push/promote to the global `library` registry, manage spotlight/featured images on the landing page
 - `user` — default for all accounts after the first; manages their own registries and orgs
 
 **Organization roles:**
@@ -96,7 +100,7 @@ official_site: https://github.com/webappsgo/casreg
 **Core entities:**
 - `User` — id, username, email (unique), bcrypt_password_hash, role, locked_until, passkey_credentials, 2fa_method, created_at
 - `Organization` — id, name (unique), visibility, owner_user_id, quota_bytes, created_at
-- `Registry` — id, org_id (nullable for personal), name, image_type (`oci` or `incus`), visibility, immutable_tags, retention_policy, scan_policy, created_at
+- `Registry` — id, org_id (nullable for personal), name, image_type (`oci` or `incus`), is_global (bool; at most one global OCI registry and one global Incus registry per casreg instance), visibility, immutable_tags, retention_policy, scan_policy, created_at
 - `Repository` — id, registry_id, name, visibility (≤ parent), description, created_at
 - `Tag` — id, repository_id, name, manifest_digest, pushed_by, pushed_at, immutable
 - `Manifest` — id, repository_id, digest (sha256:…), media_type, size_bytes, config_digest, created_at
@@ -113,6 +117,7 @@ official_site: https://github.com/webappsgo/casreg
 - `SupportTicket` — id, reporter_user_id, assignee_user_id, status, priority, title, body, created_at
 - `ProxyCache` — id, name, upstream_url, upstream_auth_secret_ref, ttl_hours, last_synced_at
 - `ReplicationRule` — id, name, source (local or remote url), dest (local or remote url), filter_pattern, trigger (push/schedule), enabled
+- `SpotlightEntry` — id, resource_type (`oci_image` or `incus_image`), resource_id, title, subtitle, display_order, active, created_by (admin user id), created_at; controls what appears in the Featured/Spotlight section of the landing page
 
 ### Trust boundaries & external services
 
