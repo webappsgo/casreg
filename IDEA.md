@@ -56,6 +56,9 @@ official_site: https://github.com/webappsgo/casreg
 - Pull analytics: per-image and per-tag pull statistics aggregated daily and queryable as weekly/monthly time-series; maintainers see adoption trends, admins see instance-wide totals
 - OCI artifact support beyond container images: Helm OCI charts, WebAssembly modules, and generic OCI artifacts stored and served via the same V2 API; artifact type detected from the manifest `mediaType` and displayed correctly in the UI rather than rendered as a container image
 - Namespace reservation and typosquatting protection: a configurable reserved-names list for the global registry and top-level user/org namespaces; registration of names that match reserved patterns or are close variants of protected names (configurable edit-distance threshold) is blocked with a descriptive error
+- Two trust tiers for public discovery:
+  - **Official Image** — images in the global `library` OCI registry or global Incus catalog carry this designation implicitly; no separate flag needed; displayed as a distinct "Official Image" badge on image cards and in search results
+  - **Verified Publisher** — admin-granted badge at the org or user namespace level confirming real-world identity; displayed as a checkmark next to the name everywhere it appears (namespace page, image cards, search results, pull command snippets); verified namespaces rank above unverified ones when search queries are ambiguous; admins can configure OIDC org mappings to auto-grant Verified Publisher status on first SSO login (verified_by_user_id is null for auto-grants, non-null for manual grants); revocable by admins at any time; does not imply image security — scan results carry that signal separately
 - Scheduled task visibility: UI panel and API endpoint showing last-run time and next scheduled run for all background tasks — daily Spotlight recalculation, GC sweep, scan DB update, replication sync, simplestreams index rebuild; operators use this for operational confidence without needing log access
 - Per-user dark/light/auto theme preference (dark is default; auto follows system preference) — as already defined in AI.md; unauthenticated visitors see dark by default
 
@@ -73,7 +76,7 @@ official_site: https://github.com/webappsgo/casreg
 ### Roles & permissions
 
 **System roles (global):**
-- `admin` — full system control: user management, global config, audit logs, system-wide scan policies, push/promote to the global `library` registry, set the `is_pinned` editorial override on any public image (OCI or Incus)
+- `admin` — full system control: user management, global config, audit logs, system-wide scan policies, push/promote to the global `library` registry, set the `is_pinned` editorial override on any public image (OCI or Incus), grant and revoke Verified Publisher status on any org or user, configure OIDC org → verified namespace mappings
 - `user` — default for all accounts after the first; manages their own registries and orgs
 
 **Organization roles:**
@@ -102,6 +105,7 @@ official_site: https://github.com/webappsgo/casreg
 - Robot accounts cannot be promoted to system roles under any circumstance
 - Tags are mutable pointers scoped to their own namespace and repository; overwriting `{userB}/alpine:latest` (including after a cross-namespace copy) only updates that tag record and never affects any tag in another namespace — a user can only modify tags they have write permission on
 - Blobs are immutable and content-addressed by SHA256 digest; ref_count tracks all references across all namespaces; a blob is only eligible for GC deletion when ref_count reaches zero — overwriting or deleting a tag in one namespace cannot cause blob deletion while any other namespace still holds a reference to that digest
+- Verified Publisher status does not imply image security; scan results, signature status, and SBOM availability are independent signals; a verified namespace can still publish an image with critical CVEs
 
 ### Data model & sensitivity
 
@@ -115,8 +119,8 @@ official_site: https://github.com/webappsgo/casreg
 | Low | Registry/org names, public image layers, documentation, knowledge base articles | Publicly accessible for public registries |
 
 **Core entities:**
-- `User` — id, username, email (unique), bcrypt_password_hash, role, locked_until, passkey_credentials, 2fa_method, created_at
-- `Organization` — id, name (unique), visibility, owner_user_id, quota_bytes, created_at
+- `User` — id, username, email (unique), bcrypt_password_hash, role, locked_until, passkey_credentials, 2fa_method, is_verified, verified_at, verified_by_user_id (null = auto-granted via OIDC; non-null = granted by a human admin), created_at
+- `Organization` — id, name (unique), visibility, owner_user_id, quota_bytes, is_verified, verified_at, verified_by_user_id (null = auto-granted via OIDC org mapping; non-null = granted by a human admin), created_at
 - `Registry` — id, org_id (nullable for personal), name, image_type (`oci` or `incus`), is_global (bool; at most one global OCI registry and one global Incus registry per casreg instance), visibility, immutable_tags, retention_policy, scan_policy, created_at
 - `Repository` — id, registry_id, name, visibility (≤ parent), description, pull_count, is_pinned (admin override for spotlight), is_deprecated, deprecation_message, created_at
 - `Tag` — id, repository_id, name, manifest_digest, pushed_by, pushed_at, immutable
