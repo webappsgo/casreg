@@ -137,7 +137,23 @@ official_site: https://github.com/webappsgo/casreg
 - `Star` — id, user_id, resource_type (`oci_repo` or `incus_image`), resource_id, created_at; unique per (user_id, resource_type, resource_id)
 - `PullStat` — resource_type, resource_id, date (day bucket), pull_count; daily aggregation used for time-series analytics and rolling-window Most Pulled ranking
 - `Notification` — id, user_id, event_type, resource_type, resource_id, message, read, created_at; in-app inbox entries; casreg-specific event types extend the base framework defined in AI.md
-- `ReservedNamespace` — id, pattern, match_type (`exact` or `glob`), reason, created_by (admin user id), created_at; names matching any reserved pattern are blocked from registration
+- `ReservedNamespace` — id, pattern, match_type (`exact`, `glob`, or `edit_distance`), reason, created_by (admin user id, null for built-in defaults), created_at; names matching any reserved pattern are blocked from registration; built-in defaults ship with the binary and cannot be deleted, only supplemented by admin-added entries
+
+**Default reserved namespace list (ships with the binary):**
+
+*System paths — casreg's own routes; can never be a user namespace:*
+`library`, `images`, `admin`, `system`, `root`, `api`, `v1`, `v2`, `health`, `metrics`, `swagger`, `_catalog`, `search`, `explore`, `login`, `logout`, `register`, `signup`, `signin`, `settings`, `config`, `support`, `docs`, `static`, `assets`, `streams`, `internal`
+
+*Official image names — highest supply-chain risk targets (exact match):*
+`alpine`, `ubuntu`, `debian`, `centos`, `fedora`, `rocky`, `almalinux`, `busybox`, `scratch`, `nginx`, `apache`, `httpd`, `caddy`, `traefik`, `haproxy`, `redis`, `memcached`, `mysql`, `mariadb`, `postgres`, `postgresql`, `mongodb`, `mongo`, `cassandra`, `elasticsearch`, `opensearch`, `influxdb`, `node`, `python`, `ruby`, `golang`, `rust`, `php`, `openjdk`, `dotnet`, `perl`, `swift`, `wordpress`, `drupal`, `ghost`, `nextcloud`, `jenkins`, `registry`, `vault`, `consul`, `rabbitmq`, `kafka`, `nats`, `prometheus`, `grafana`, `portainer`, `minio`, `etcd`, `coredns`, `docker`, `moby`
+
+*Vendor and org impersonation — exact match:*
+`google`, `microsoft`, `amazon`, `aws`, `azure`, `apple`, `meta`, `facebook`, `github`, `gitlab`, `bitbucket`, `atlassian`, `hashicorp`, `canonical`, `redhat`, `suse`, `docker`, `kubernetes`, `k8s`, `cncf`, `mozilla`, `cloudflare`, `fastly`, `bitnami`, `chainguard`, `linuxfoundation`, `apache`, `eclipse`
+
+*Confusable glob patterns — blocked regardless of the root word:*
+`official-*`, `*-official`, `real-*`, `*-real`, `true-*`, `*-legit`, `legit-*`, `the-real-*`, `genuine-*`, `verified-*`, `*-verified`, `secure-*`, `*-secure`
+
+*Edit-distance rule:* any registration attempt with a Levenshtein distance of 1 from any exact-reserved name above is blocked (catches single-character substitutions, insertions, deletions — e.g. `alp1ne`, `ubunti`, `ngnix`)
 
 ### Trust boundaries & external services
 
