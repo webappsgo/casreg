@@ -20,7 +20,7 @@ official_site: https://github.com/webappsgo/casreg
 - Incus REST API compliance (`/1.0/images`, `/1.0/operations`, `/1.0/` server info) for authenticated push and pull
 - Simplestreams protocol for anonymous public Incus image discovery and pull
 - Public-first anonymous browsing, searching, and pulling of public registries — no account required
-- Docker Hub-style public landing page: admin-curated Spotlight/Featured section, Newest Images feed, Most Pulled leaderboard, and a global search bar with filters (image type, OS, architecture); all browsable without login
+- Docker Hub-style public landing page: automatically ranked Spotlight/Featured section (highest pull count among images with a non-empty description and no critical CVEs, recalculated daily; admins may set an `is_pinned` flag on at most one OCI and one Incus image as a lightweight editorial override), Newest Images feed (ordered by push date), Most Pulled leaderboard (rolling 30-day pull count), and a global search bar with filters (image type, OS, architecture); all browsable without login
 - Image detail pages showing markdown description, available tags with digest/size/platform metadata, a copy-ready pull command, vulnerability scan summary, and signature verification status
 - Organization and user profile pages listing public registries, member count, and featured images
 - Global registry: a system-owned namespace (default name `library` for OCI images; top-level simplestreams catalog for Incus images) managed exclusively by server admins; unqualified image names resolve to it (`casreg pull alpine` → `library/alpine`; `incus image copy casreg:oracle/7/default` → global Incus catalog); admins can push directly or promote any public image from a user namespace into the global registry; admins can also spotlight any public image on the landing page without promoting it into `library`
@@ -58,7 +58,7 @@ official_site: https://github.com/webappsgo/casreg
 ### Roles & permissions
 
 **System roles (global):**
-- `admin` — full system control: user management, global config, audit logs, system-wide scan policies, push/promote to the global `library` registry, manage spotlight/featured images on the landing page
+- `admin` — full system control: user management, global config, audit logs, system-wide scan policies, push/promote to the global `library` registry, set the `is_pinned` editorial override on any public image (OCI or Incus)
 - `user` — default for all accounts after the first; manages their own registries and orgs
 
 **Organization roles:**
@@ -101,11 +101,11 @@ official_site: https://github.com/webappsgo/casreg
 - `User` — id, username, email (unique), bcrypt_password_hash, role, locked_until, passkey_credentials, 2fa_method, created_at
 - `Organization` — id, name (unique), visibility, owner_user_id, quota_bytes, created_at
 - `Registry` — id, org_id (nullable for personal), name, image_type (`oci` or `incus`), is_global (bool; at most one global OCI registry and one global Incus registry per casreg instance), visibility, immutable_tags, retention_policy, scan_policy, created_at
-- `Repository` — id, registry_id, name, visibility (≤ parent), description, created_at
+- `Repository` — id, registry_id, name, visibility (≤ parent), description, pull_count, is_pinned (admin override for spotlight), created_at
 - `Tag` — id, repository_id, name, manifest_digest, pushed_by, pushed_at, immutable
 - `Manifest` — id, repository_id, digest (sha256:…), media_type, size_bytes, config_digest, created_at
 - `Blob` — digest (PK), size_bytes, stored_at, ref_count (for deduplication GC)
-- `IncusImage` — id, registry_id, fingerprint (SHA256 of combined metadata+rootfs files, unique per registry), os, release, variant, arch, image_type (`container` or `vm`), metadata_size_bytes, rootfs_size_bytes, pushed_by, pushed_at
+- `IncusImage` — id, registry_id, fingerprint (SHA256 of combined metadata+rootfs files, unique per registry), os, release, variant, arch, image_type (`container` or `vm`), metadata_size_bytes, rootfs_size_bytes, pull_count, is_pinned (admin override for spotlight), pushed_by, pushed_at
 - `IncusAlias` — id, incus_image_id, name (alias string e.g. `oracle/7/default`), description
 - `IncusOperation` — id, uuid (unique), operation_type, status (`running`/`success`/`failure`), error, created_at, updated_at; short-lived, pruned after 24 hours
 - `Token` — id, user_id, name, hashed_value, scopes, expires_at, last_used_at
@@ -117,7 +117,6 @@ official_site: https://github.com/webappsgo/casreg
 - `SupportTicket` — id, reporter_user_id, assignee_user_id, status, priority, title, body, created_at
 - `ProxyCache` — id, name, upstream_url, upstream_auth_secret_ref, ttl_hours, last_synced_at
 - `ReplicationRule` — id, name, source (local or remote url), dest (local or remote url), filter_pattern, trigger (push/schedule), enabled
-- `SpotlightEntry` — id, resource_type (`oci_image` or `incus_image`), resource_id, title, subtitle, display_order, active, created_by (admin user id), created_at; controls what appears in the Featured/Spotlight section of the landing page
 
 ### Trust boundaries & external services
 
