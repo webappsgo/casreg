@@ -29,7 +29,12 @@ official_site: https://github.com/webappsgo/casreg
 - Both Incus image types: container (rootfs tarball or squashfs) and VM (disk image)
 - Incus image alias management: multiple aliases per image, scoped by namespace prefix (`{namespace}/os/release/variant`); aliases are globally unique within the casreg instance; the global Incus registry responds to unqualified aliases (no namespace prefix)
 - Async operation model for Incus push: operation ID returned immediately, client polls for completion
-- Native CLI companion (`casreg`) that speaks both OCI V2 and Incus REST directly — not a wrapper around the docker or incus CLIs; `casreg login`, `casreg push`, `casreg pull`, `casreg tag`, `casreg rm`, `casreg search` work for both image types; type is detected from the image reference format or overridden with `--type`
+- Lightweight in-registry image operations requiring no container runtime:
+  - **Cross-namespace copy**: copy any tag to another namespace or registry (`casreg copy {src}/image:tag {dst}/image:tag`); creates new Tag and Manifest records pointing to the same blob digests and increments each blob's ref_count — zero additional storage due to content-addressable deduplication; requires read permission on source and write permission on destination
+  - **Multi-arch manifest assembly**: combine existing single-arch manifests already present in the registry into a multi-arch manifest index — pure metadata, no layer data moved
+  - **Incus cross-namespace copy**: copy an Incus image to another namespace by fingerprint; creates a new IncusImage row and IncusAlias records referencing the same on-disk rootfs and metadata files — no file copy, new database rows only
+  - All operations available via the management API, web UI image detail page, and the casreg CLI
+- Native CLI companion (`casreg`) that speaks both OCI V2 and Incus REST directly — not a wrapper around the docker or incus CLIs; `casreg login`, `casreg push`, `casreg pull`, `casreg copy`, `casreg tag`, `casreg rm`, `casreg search` work for both image types; type is detected from the image reference format or overridden with `--type`
 - Supply-chain security: Trivy CVE scanning (Incus container images supported; VM disk images excluded — see non-goals), Cosign signature verification, SBOM generation (Syft), SLSA provenance attestation
 - Pull-through proxy cache for upstream OCI registries (Docker Hub, GHCR, Quay, gcr.io)
 - Registry-to-registry replication (push/pull sync)
@@ -51,7 +56,7 @@ official_site: https://github.com/webappsgo/casreg
 - Client-side rendering — web UI is server-rendered; no JavaScript framework required
 - Native mobile apps
 - Built-in CI/CD pipeline execution (use webhooks to trigger external CI)
-- Image build service (casreg stores and serves images; building them is out of scope)
+- Image build service involving Dockerfile execution or arbitrary RUN commands — requires a privileged container runtime on the server, conflicts with the single static binary model, and is an unacceptable attack surface; use webhooks to trigger external CI instead
 - Helm chart repository (OCI-based Helm is in scope as it uses the same V2 API)
 - Incus cluster federation or instance-to-instance live migration
 
