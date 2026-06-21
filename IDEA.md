@@ -170,7 +170,7 @@ official_site: https://github.com/webappsgo/casreg
 |------------|---------|
 | Credential stuffing | bcrypt with cost ≥ 12; account lockout after 5 failures for 15 min; constant-time comparison for all token checks |
 | Scraping of public images | Per-IP rate limiting for anonymous requests (100 req/hour default); exponential backoff on 429 |
-| Blob storage abuse (arbitrary file upload) | Blobs only accepted at `/v2/{name}/blobs/uploads/`; media type validated; digest verified against declared SHA256 |
+| Blob storage abuse (arbitrary file upload) | Blobs only accepted via the standardized Docker V2 upload endpoint; media type validated; digest verified against declared SHA256 |
 | SSRF via pull-through or webhook URLs | Webhook and proxy upstream URLs blocked against RFC 1918, loopback, link-local, and metadata ranges before any outbound connection |
 | Supply-chain poisoning via push | Scan gates block push or pull above configured CVE severity; signature enforcement per-registry; tag immutability prevents overwrite |
 | Path traversal in storage | Blob paths are derived solely from the hex SHA256 digest; never from user-supplied filenames |
