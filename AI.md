@@ -1119,6 +1119,7 @@ Quick reference: Accept `yes/no`, `true/false`, `1/0`, `on/off`, `enable/disable
 | `AI.md` | ✓ | Project specification (HOW - implementation patterns) |
 | `IDEA.md` | ✓ | Project idea (WHAT - business logic, features) |
 | `CLAUDE.md` | ✓ | Claude Code quick loader - critical rules + references into `AI.md` |
+| `SPEC.md` | Optional | Project-specific rule overrides — SPEC.md > AI.md > global CLAUDE.md; created only when a rule must differ from the template or global; may be empty |
 | `PLAN.md` | Optional | Project plan — human edits/owns. AI reads, interprets, executes, and marks items done in place. Never rewrite or restructure |
 | `PLAN.AI.md` | Optional | Project plan — AI creates/updates. If it exists, this is THE plan |
 | `TODO.md` | Optional | Task list — human edits/owns. AI reads, interprets, executes, and marks items done in place. Never delete, empty, or restructure |
@@ -1912,6 +1913,7 @@ Instructions for how this agent should behave...
 | `IDEA.md` | ✓ | Project plan and features | No |
 | `CLAUDE.md` | ✓ | Claude Code project memory (primary location) | No |
 | `CLAUDE.local.md` | - | Personal Claude Code preferences | **Yes** |
+| `SPEC.md` | - | Project-specific rule overrides — SPEC.md > AI.md > global CLAUDE.md; created only when a rule must differ from template | No |
 | `README.md` | ✓ | Project documentation | No |
 | `LICENSE.md` | ✓ | MIT license + embedded third-party licenses | No |
 | `go.mod` | ✓ | Go module definition | No |
@@ -3300,6 +3302,7 @@ Spec version: {line count or hash}
 | Plain `git push` | Bypasses the commit wrapper entirely |
 | Subagent writing `.git/COMMIT_MESS` | Commit message must be written by the parent instance after reviewing the actual diff |
 | Subagent calling `gitcommit` | Only the parent (main) instance runs gitcommit — subagents complete edits and report back |
+| Bare `@name` in commit body | Any `@username` in a commit message creates a GitHub contributor notification/link — never use bare `@` unless intentionally crediting a real contributor; write names without `@` or wrap in backticks |
 | Deleting files without confirmation | Destructive action |
 | Changing NON-NEGOTIABLE sections | Specification violation |
 | Skipping validation | Security requirement |
@@ -36780,6 +36783,7 @@ GO_DOCKER := docker run --rm -it \
 	-v $(GO_BUILD):/usr/local/share/go/cache \
 	-w /app \
 	-e CGO_ENABLED=0 \
+	-e GOFLAGS=-buildvcs=false \
 	casjaysdev/go:latest
 
 .PHONY: build local release docker test dev clean
@@ -36799,7 +36803,7 @@ build: clean
 	# Build for local OS/ARCH
 	@echo "Building local binary..."
 	@$(GO_DOCKER) sh -c "GOOS=$$(go env GOOS) GOARCH=$$(go env GOARCH) \
-		go build -ldflags \"$(LDFLAGS)\" -o $(BINDIR)/$(PROJECTNAME) ./src"
+		go build -buildvcs=false -ldflags \"$(LDFLAGS)\" -o $(BINDIR)/$(PROJECTNAME) ./src"
 
 	# Build server for all platforms
 	@for platform in $(PLATFORMS); do \
@@ -36809,7 +36813,7 @@ build: clean
 		[ "$$OS" = "windows" ] && OUTPUT=$$OUTPUT.exe; \
 		echo "Building server $$OS/$$ARCH..."; \
 		$(GO_DOCKER) sh -c "GOOS=$$OS GOARCH=$$ARCH \
-			go build -ldflags \"$(LDFLAGS)\" \
+			go build -buildvcs=false -ldflags \"$(LDFLAGS)\" \
 			-o $$OUTPUT ./src" || exit 1; \
 	done
 
@@ -36822,7 +36826,7 @@ build: clean
 			[ "$$OS" = "windows" ] && OUTPUT=$$OUTPUT.exe; \
 			echo "Building CLI $$OS/$$ARCH..."; \
 			$(GO_DOCKER) sh -c "GOOS=$$OS GOARCH=$$ARCH \
-				go build -ldflags \"$(LDFLAGS)\" \
+				go build -buildvcs=false -ldflags \"$(LDFLAGS)\" \
 				-o $$OUTPUT ./src/client" || exit 1; \
 		done; \
 	fi
@@ -36836,7 +36840,7 @@ build: clean
 			[ "$$OS" = "windows" ] && OUTPUT=$$OUTPUT.exe; \
 			echo "Building agent $$OS/$$ARCH..."; \
 			$(GO_DOCKER) sh -c "GOOS=$$OS GOARCH=$$ARCH \
-				go build -ldflags \"$(LDFLAGS)\" \
+				go build -buildvcs=false -ldflags \"$(LDFLAGS)\" \
 				-o $$OUTPUT ./src/agent" || exit 1; \
 		done; \
 	fi
@@ -36858,20 +36862,20 @@ local: clean
 	# Build server binary
 	@echo "Building $(PROJECTNAME)..."
 	@$(GO_DOCKER) sh -c "GOOS=$$(go env GOOS) GOARCH=$$(go env GOARCH) \
-		go build -ldflags \"$(LDFLAGS)\" -o $(BINDIR)/$(PROJECTNAME) ./src"
+		go build -buildvcs=false -ldflags \"$(LDFLAGS)\" -o $(BINDIR)/$(PROJECTNAME) ./src"
 
 	# Build CLI binary (if exists)
 	@if [ -d "src/client" ]; then \
 		echo "Building $(PROJECTNAME)-cli..."; \
 		$(GO_DOCKER) sh -c "GOOS=$$(go env GOOS) GOARCH=$$(go env GOARCH) \
-			go build -ldflags \"$(LDFLAGS)\" -o $(BINDIR)/$(PROJECTNAME)-cli ./src/client"; \
+			go build -buildvcs=false -ldflags \"$(LDFLAGS)\" -o $(BINDIR)/$(PROJECTNAME)-cli ./src/client"; \
 	fi
 
 	# Build agent binary (if exists)
 	@if [ -d "src/agent" ]; then \
 		echo "Building $(PROJECTNAME)-agent..."; \
 		$(GO_DOCKER) sh -c "GOOS=$$(go env GOOS) GOARCH=$$(go env GOARCH) \
-			go build -ldflags \"$(LDFLAGS)\" -o $(BINDIR)/$(PROJECTNAME)-agent ./src/agent"; \
+			go build -buildvcs=false -ldflags \"$(LDFLAGS)\" -o $(BINDIR)/$(PROJECTNAME)-agent ./src/agent"; \
 	fi
 
 	@echo "Local build complete: $(BINDIR)/"
@@ -36944,14 +36948,17 @@ docker:
 # =============================================================================
 test:
 	@echo "Running tests with coverage..."
-	@$(GO_DOCKER) go mod download
-	@$(GO_DOCKER) go test -v -cover -coverprofile=coverage.out ./...
-	@COVERAGE=$$($(GO_DOCKER) go tool cover -func=coverage.out | grep total | awk '{print $$3}' | sed 's/%//'); \
-	if [ $$(echo "$$COVERAGE < 80" | bc -l) -eq 1 ]; then \
-		echo "ERROR: Coverage is $$COVERAGE%, must be >= 80%"; \
-		exit 1; \
-	fi
-	@echo "Tests complete - Coverage: $$COVERAGE% (>= 80% required) ✓"
+	@$(GO_DOCKER) sh -c " \
+		mkdir -p \"/tmp/$(PROJECTORG)\" && \
+		COVDIR=\$$(mktemp -d \"/tmp/$(PROJECTORG)/$(PROJECTNAME)-XXXXXX\") && \
+		go mod download && \
+		go test -v -cover -coverprofile=\$$COVDIR/coverage.out ./... && \
+		COVERAGE=\$$(go tool cover -func=\$$COVDIR/coverage.out | grep total | awk '{print \$$3}' | sed 's/%//') && \
+		echo \"Coverage: \$$COVERAGE%\" && \
+		if [ \$$(echo \"\$$COVERAGE < 80\" | bc -l) -eq 1 ]; then \
+			echo \"ERROR: Coverage is \$$COVERAGE%, must be >= 80%\"; exit 1; \
+		fi && \
+		echo \"Tests complete - Coverage: \$$COVERAGE% (>= 80% required) ✓\""
 
 # =============================================================================
 # DEV - Quick build for local development/testing (to random temp dir)
@@ -38968,11 +38975,16 @@ jobs:
       CGO_ENABLED: "0"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-      - run: go test -cover -coverprofile=coverage.out ./...
+      - name: Run tests with coverage
+        run: |
+          mkdir -p "/tmp/${{ github.repository_owner }}"
+          COVDIR=$(mktemp -d "/tmp/${{ github.repository_owner }}/$(basename "${{ github.repository }}")-XXXXXX")
+          echo "COVDIR=$COVDIR" >> "$GITHUB_ENV"
+          go test -cover -coverprofile="$COVDIR/coverage.out" ./...
       - name: Enforce coverage threshold
         run: |
           THRESHOLD=60
-          PCT=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%","",$3); print int($3)}')
+          PCT=$(go tool cover -func="$COVDIR/coverage.out" | awk '/^total:/ {gsub("%","",$3); print int($3)}')
           if [ "$PCT" -lt "$THRESHOLD" ]; then
             echo "::error::coverage $PCT% < threshold $THRESHOLD%"
             exit 1
@@ -38987,7 +38999,7 @@ jobs:
       CGO_ENABLED: "0"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-      - run: go build ./...
+      - run: go build -buildvcs=false ./...
 
   vuln-check:
     needs: ensure-build-image
@@ -39154,7 +39166,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src
 
       # CLI build - only if src/client/ directory exists
       - name: Build CLI
@@ -39165,7 +39177,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/client
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/client
 
       - name: Upload server artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -39189,7 +39201,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/agent
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/agent
 
       - name: Upload Agent artifact
         if: hashFiles('src/agent/') != ''
@@ -39346,7 +39358,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src
 
       # CLI build - only if src/client/ directory exists
       - name: Build CLI
@@ -39357,7 +39369,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/client
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/client
 
       - name: Upload server artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -39381,7 +39393,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/agent
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/agent
 
       - name: Upload Agent artifact
         if: hashFiles('src/agent/') != ''
@@ -39530,7 +39542,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src
 
       # CLI build - only if src/client/ directory exists
       - name: Build CLI
@@ -39541,7 +39553,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/client
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/client
 
       - name: Upload server artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -39565,7 +39577,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/agent
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/agent
 
       - name: Upload Agent artifact
         if: hashFiles('src/agent/') != ''
@@ -40021,7 +40033,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src
 
       # CLI build - only if src/client/ directory exists
       - name: Build CLI
@@ -40032,7 +40044,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/client
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/client
 
       - name: Upload server artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -40056,7 +40068,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/agent
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/agent
 
       - name: Upload Agent artifact
         if: hashFiles('src/agent/') != ''
@@ -40199,7 +40211,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src
 
       # CLI build - only if src/client/ directory exists
       - name: Build CLI
@@ -40210,7 +40222,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/client
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/client
 
       - name: Upload server artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -40234,7 +40246,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/agent
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/agent
 
       - name: Upload Agent artifact
         if: hashFiles('src/agent/') != ''
@@ -40383,7 +40395,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src
 
       # CLI build - only if src/client/ directory exists
       - name: Build CLI
@@ -40394,7 +40406,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/client
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/client
 
       - name: Upload server artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -40418,7 +40430,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIALSITE }}'"
-          go build -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/agent
+          go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${{ env.PROJECTNAME }}-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/agent
 
       - name: Upload Agent artifact
         if: hashFiles('src/agent/') != ''
@@ -40821,9 +40833,9 @@ build:linux-amd64:
     GOOS: linux
     GOARCH: amd64
   script:
-    - go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-linux-amd64 ./src
-    - if [ -d "src/client" ]; then go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-linux-amd64 ./src/client; fi
-    - if [ -d "src/agent" ]; then go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-linux-amd64 ./src/agent; fi
+    - go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-linux-amd64 ./src
+    - if [ -d "src/client" ]; then go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-linux-amd64 ./src/client; fi
+    - if [ -d "src/agent" ]; then go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-linux-amd64 ./src/agent; fi
   artifacts:
     paths:
       - ${PROJECT_NAME}-linux-amd64*
@@ -40838,9 +40850,9 @@ build:linux-arm64:
     GOOS: linux
     GOARCH: arm64
   script:
-    - go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-linux-arm64 ./src
-    - if [ -d "src/client" ]; then go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-linux-arm64 ./src/client; fi
-    - if [ -d "src/agent" ]; then go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-linux-arm64 ./src/agent; fi
+    - go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-linux-arm64 ./src
+    - if [ -d "src/client" ]; then go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-linux-arm64 ./src/client; fi
+    - if [ -d "src/agent" ]; then go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-linux-arm64 ./src/agent; fi
   artifacts:
     paths:
       - ${PROJECT_NAME}-linux-arm64*
@@ -40855,9 +40867,9 @@ build:darwin-amd64:
     GOOS: darwin
     GOARCH: amd64
   script:
-    - go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-darwin-amd64 ./src
-    - if [ -d "src/client" ]; then go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-darwin-amd64 ./src/client; fi
-    - if [ -d "src/agent" ]; then go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-darwin-amd64 ./src/agent; fi
+    - go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-darwin-amd64 ./src
+    - if [ -d "src/client" ]; then go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-darwin-amd64 ./src/client; fi
+    - if [ -d "src/agent" ]; then go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-darwin-amd64 ./src/agent; fi
   artifacts:
     paths:
       - ${PROJECT_NAME}-darwin-amd64*
@@ -40872,9 +40884,9 @@ build:darwin-arm64:
     GOOS: darwin
     GOARCH: arm64
   script:
-    - go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-darwin-arm64 ./src
-    - if [ -d "src/client" ]; then go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-darwin-arm64 ./src/client; fi
-    - if [ -d "src/agent" ]; then go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-darwin-arm64 ./src/agent; fi
+    - go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-darwin-arm64 ./src
+    - if [ -d "src/client" ]; then go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-darwin-arm64 ./src/client; fi
+    - if [ -d "src/agent" ]; then go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-darwin-arm64 ./src/agent; fi
   artifacts:
     paths:
       - ${PROJECT_NAME}-darwin-arm64*
@@ -40889,9 +40901,9 @@ build:windows-amd64:
     GOOS: windows
     GOARCH: amd64
   script:
-    - go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-windows-amd64.exe ./src
-    - if [ -d "src/client" ]; then go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-windows-amd64.exe ./src/client; fi
-    - if [ -d "src/agent" ]; then go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-windows-amd64.exe ./src/agent; fi
+    - go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-windows-amd64.exe ./src
+    - if [ -d "src/client" ]; then go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-windows-amd64.exe ./src/client; fi
+    - if [ -d "src/agent" ]; then go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-windows-amd64.exe ./src/agent; fi
   artifacts:
     paths:
       - ${PROJECT_NAME}-windows-amd64*.exe
@@ -40906,9 +40918,9 @@ build:windows-arm64:
     GOOS: windows
     GOARCH: arm64
   script:
-    - go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-windows-arm64.exe ./src
-    - if [ -d "src/client" ]; then go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-windows-arm64.exe ./src/client; fi
-    - if [ -d "src/agent" ]; then go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-windows-arm64.exe ./src/agent; fi
+    - go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-windows-arm64.exe ./src
+    - if [ -d "src/client" ]; then go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-windows-arm64.exe ./src/client; fi
+    - if [ -d "src/agent" ]; then go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-windows-arm64.exe ./src/agent; fi
   artifacts:
     paths:
       - ${PROJECT_NAME}-windows-arm64*.exe
@@ -40923,9 +40935,9 @@ build:freebsd-amd64:
     GOOS: freebsd
     GOARCH: amd64
   script:
-    - go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-freebsd-amd64 ./src
-    - if [ -d "src/client" ]; then go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-freebsd-amd64 ./src/client; fi
-    - if [ -d "src/agent" ]; then go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-freebsd-amd64 ./src/agent; fi
+    - go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-freebsd-amd64 ./src
+    - if [ -d "src/client" ]; then go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-freebsd-amd64 ./src/client; fi
+    - if [ -d "src/agent" ]; then go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-freebsd-amd64 ./src/agent; fi
   artifacts:
     paths:
       - ${PROJECT_NAME}-freebsd-amd64*
@@ -40940,9 +40952,9 @@ build:freebsd-arm64:
     GOOS: freebsd
     GOARCH: arm64
   script:
-    - go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-freebsd-arm64 ./src
-    - if [ -d "src/client" ]; then go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-freebsd-arm64 ./src/client; fi
-    - if [ -d "src/agent" ]; then go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-freebsd-arm64 ./src/agent; fi
+    - go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-freebsd-arm64 ./src
+    - if [ -d "src/client" ]; then go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-freebsd-arm64 ./src/client; fi
+    - if [ -d "src/agent" ]; then go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-freebsd-arm64 ./src/agent; fi
   artifacts:
     paths:
       - ${PROJECT_NAME}-freebsd-arm64*
@@ -41028,32 +41040,32 @@ build:beta:
     - export LDFLAGS="-s -w -X 'main.Version=${VERSION}' -X 'main.CommitID=${COMMIT_ID}' -X 'main.BuildDate=${BUILD_DATE}' -X 'main.OfficialSite=${OFFICIAL_SITE}'"
   script:
     # Build all 8 platforms
-    - GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-linux-amd64 ./src
-    - GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-linux-arm64 ./src
-    - GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-darwin-amd64 ./src
-    - GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-darwin-arm64 ./src
-    - GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-windows-amd64.exe ./src
-    - GOOS=windows GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-windows-arm64.exe ./src
-    - GOOS=freebsd GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-freebsd-amd64 ./src
-    - GOOS=freebsd GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-freebsd-arm64 ./src
+    - GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-linux-amd64 ./src
+    - GOOS=linux GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-linux-arm64 ./src
+    - GOOS=darwin GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-darwin-amd64 ./src
+    - GOOS=darwin GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-darwin-arm64 ./src
+    - GOOS=windows GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-windows-amd64.exe ./src
+    - GOOS=windows GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-windows-arm64.exe ./src
+    - GOOS=freebsd GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-freebsd-amd64 ./src
+    - GOOS=freebsd GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-freebsd-arm64 ./src
     # Build CLI if exists
-    - if [ -d "src/client" ]; then GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-linux-amd64 ./src/client; fi
-    - if [ -d "src/client" ]; then GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-linux-arm64 ./src/client; fi
-    - if [ -d "src/client" ]; then GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-darwin-amd64 ./src/client; fi
-    - if [ -d "src/client" ]; then GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-darwin-arm64 ./src/client; fi
-    - if [ -d "src/client" ]; then GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-windows-amd64.exe ./src/client; fi
-    - if [ -d "src/client" ]; then GOOS=windows GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-windows-arm64.exe ./src/client; fi
-    - if [ -d "src/client" ]; then GOOS=freebsd GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-freebsd-amd64 ./src/client; fi
-    - if [ -d "src/client" ]; then GOOS=freebsd GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-freebsd-arm64 ./src/client; fi
+    - if [ -d "src/client" ]; then GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-linux-amd64 ./src/client; fi
+    - if [ -d "src/client" ]; then GOOS=linux GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-linux-arm64 ./src/client; fi
+    - if [ -d "src/client" ]; then GOOS=darwin GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-darwin-amd64 ./src/client; fi
+    - if [ -d "src/client" ]; then GOOS=darwin GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-darwin-arm64 ./src/client; fi
+    - if [ -d "src/client" ]; then GOOS=windows GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-windows-amd64.exe ./src/client; fi
+    - if [ -d "src/client" ]; then GOOS=windows GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-windows-arm64.exe ./src/client; fi
+    - if [ -d "src/client" ]; then GOOS=freebsd GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-freebsd-amd64 ./src/client; fi
+    - if [ -d "src/client" ]; then GOOS=freebsd GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-freebsd-arm64 ./src/client; fi
     # Build Agent if exists
-    - if [ -d "src/agent" ]; then GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-linux-amd64 ./src/agent; fi
-    - if [ -d "src/agent" ]; then GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-linux-arm64 ./src/agent; fi
-    - if [ -d "src/agent" ]; then GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-darwin-amd64 ./src/agent; fi
-    - if [ -d "src/agent" ]; then GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-darwin-arm64 ./src/agent; fi
-    - if [ -d "src/agent" ]; then GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-windows-amd64.exe ./src/agent; fi
-    - if [ -d "src/agent" ]; then GOOS=windows GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-windows-arm64.exe ./src/agent; fi
-    - if [ -d "src/agent" ]; then GOOS=freebsd GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-freebsd-amd64 ./src/agent; fi
-    - if [ -d "src/agent" ]; then GOOS=freebsd GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-freebsd-arm64 ./src/agent; fi
+    - if [ -d "src/agent" ]; then GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-linux-amd64 ./src/agent; fi
+    - if [ -d "src/agent" ]; then GOOS=linux GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-linux-arm64 ./src/agent; fi
+    - if [ -d "src/agent" ]; then GOOS=darwin GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-darwin-amd64 ./src/agent; fi
+    - if [ -d "src/agent" ]; then GOOS=darwin GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-darwin-arm64 ./src/agent; fi
+    - if [ -d "src/agent" ]; then GOOS=windows GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-windows-amd64.exe ./src/agent; fi
+    - if [ -d "src/agent" ]; then GOOS=windows GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-windows-arm64.exe ./src/agent; fi
+    - if [ -d "src/agent" ]; then GOOS=freebsd GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-freebsd-amd64 ./src/agent; fi
+    - if [ -d "src/agent" ]; then GOOS=freebsd GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-freebsd-arm64 ./src/agent; fi
   artifacts:
     paths:
       - ${PROJECT_NAME}-*
@@ -41076,32 +41088,32 @@ build:daily:
     - export LDFLAGS="-s -w -X 'main.Version=${VERSION}' -X 'main.CommitID=${COMMIT_ID}' -X 'main.BuildDate=${BUILD_DATE}' -X 'main.OfficialSite=${OFFICIAL_SITE}'"
   script:
     # Build all 8 platforms
-    - GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-linux-amd64 ./src
-    - GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-linux-arm64 ./src
-    - GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-darwin-amd64 ./src
-    - GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-darwin-arm64 ./src
-    - GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-windows-amd64.exe ./src
-    - GOOS=windows GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-windows-arm64.exe ./src
-    - GOOS=freebsd GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-freebsd-amd64 ./src
-    - GOOS=freebsd GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-freebsd-arm64 ./src
+    - GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-linux-amd64 ./src
+    - GOOS=linux GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-linux-arm64 ./src
+    - GOOS=darwin GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-darwin-amd64 ./src
+    - GOOS=darwin GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-darwin-arm64 ./src
+    - GOOS=windows GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-windows-amd64.exe ./src
+    - GOOS=windows GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-windows-arm64.exe ./src
+    - GOOS=freebsd GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-freebsd-amd64 ./src
+    - GOOS=freebsd GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-freebsd-arm64 ./src
     # Build CLI if exists
-    - if [ -d "src/client" ]; then GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-linux-amd64 ./src/client; fi
-    - if [ -d "src/client" ]; then GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-linux-arm64 ./src/client; fi
-    - if [ -d "src/client" ]; then GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-darwin-amd64 ./src/client; fi
-    - if [ -d "src/client" ]; then GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-darwin-arm64 ./src/client; fi
-    - if [ -d "src/client" ]; then GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-windows-amd64.exe ./src/client; fi
-    - if [ -d "src/client" ]; then GOOS=windows GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-windows-arm64.exe ./src/client; fi
-    - if [ -d "src/client" ]; then GOOS=freebsd GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-freebsd-amd64 ./src/client; fi
-    - if [ -d "src/client" ]; then GOOS=freebsd GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-freebsd-arm64 ./src/client; fi
+    - if [ -d "src/client" ]; then GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-linux-amd64 ./src/client; fi
+    - if [ -d "src/client" ]; then GOOS=linux GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-linux-arm64 ./src/client; fi
+    - if [ -d "src/client" ]; then GOOS=darwin GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-darwin-amd64 ./src/client; fi
+    - if [ -d "src/client" ]; then GOOS=darwin GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-darwin-arm64 ./src/client; fi
+    - if [ -d "src/client" ]; then GOOS=windows GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-windows-amd64.exe ./src/client; fi
+    - if [ -d "src/client" ]; then GOOS=windows GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-windows-arm64.exe ./src/client; fi
+    - if [ -d "src/client" ]; then GOOS=freebsd GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-freebsd-amd64 ./src/client; fi
+    - if [ -d "src/client" ]; then GOOS=freebsd GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli-freebsd-arm64 ./src/client; fi
     # Build Agent if exists
-    - if [ -d "src/agent" ]; then GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-linux-amd64 ./src/agent; fi
-    - if [ -d "src/agent" ]; then GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-linux-arm64 ./src/agent; fi
-    - if [ -d "src/agent" ]; then GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-darwin-amd64 ./src/agent; fi
-    - if [ -d "src/agent" ]; then GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-darwin-arm64 ./src/agent; fi
-    - if [ -d "src/agent" ]; then GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-windows-amd64.exe ./src/agent; fi
-    - if [ -d "src/agent" ]; then GOOS=windows GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-windows-arm64.exe ./src/agent; fi
-    - if [ -d "src/agent" ]; then GOOS=freebsd GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-freebsd-amd64 ./src/agent; fi
-    - if [ -d "src/agent" ]; then GOOS=freebsd GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-freebsd-arm64 ./src/agent; fi
+    - if [ -d "src/agent" ]; then GOOS=linux GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-linux-amd64 ./src/agent; fi
+    - if [ -d "src/agent" ]; then GOOS=linux GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-linux-arm64 ./src/agent; fi
+    - if [ -d "src/agent" ]; then GOOS=darwin GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-darwin-amd64 ./src/agent; fi
+    - if [ -d "src/agent" ]; then GOOS=darwin GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-darwin-arm64 ./src/agent; fi
+    - if [ -d "src/agent" ]; then GOOS=windows GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-windows-amd64.exe ./src/agent; fi
+    - if [ -d "src/agent" ]; then GOOS=windows GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-windows-arm64.exe ./src/agent; fi
+    - if [ -d "src/agent" ]; then GOOS=freebsd GOARCH=amd64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-freebsd-amd64 ./src/agent; fi
+    - if [ -d "src/agent" ]; then GOOS=freebsd GOARCH=arm64 go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-agent-freebsd-arm64 ./src/agent; fi
   artifacts:
     paths:
       - ${PROJECT_NAME}-*
@@ -41417,7 +41429,7 @@ pipeline {
                                 -e GOOS=linux \
                                 -e GOARCH=amd64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-linux-amd64 ./src
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-linux-amd64 ./src
                         '''
                     }
                 }
@@ -41435,7 +41447,7 @@ pipeline {
                                 -e GOOS=linux \
                                 -e GOARCH=arm64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-linux-arm64 ./src
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-linux-arm64 ./src
                         '''
                     }
                 }
@@ -41454,7 +41466,7 @@ pipeline {
                                 -e GOOS=darwin \
                                 -e GOARCH=amd64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-darwin-amd64 ./src
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-darwin-amd64 ./src
                         '''
                     }
                 }
@@ -41472,7 +41484,7 @@ pipeline {
                                 -e GOOS=darwin \
                                 -e GOARCH=arm64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-darwin-arm64 ./src
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-darwin-arm64 ./src
                         '''
                     }
                 }
@@ -41491,7 +41503,7 @@ pipeline {
                                 -e GOOS=windows \
                                 -e GOARCH=amd64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-windows-amd64.exe ./src
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-windows-amd64.exe ./src
                         '''
                     }
                 }
@@ -41509,7 +41521,7 @@ pipeline {
                                 -e GOOS=windows \
                                 -e GOARCH=arm64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-windows-arm64.exe ./src
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-windows-arm64.exe ./src
                         '''
                     }
                 }
@@ -41528,7 +41540,7 @@ pipeline {
                                 -e GOOS=freebsd \
                                 -e GOARCH=amd64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-freebsd-amd64 ./src
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-freebsd-amd64 ./src
                         '''
                     }
                 }
@@ -41546,7 +41558,7 @@ pipeline {
                                 -e GOOS=freebsd \
                                 -e GOARCH=arm64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-freebsd-arm64 ./src
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-freebsd-arm64 ./src
                         '''
                     }
                 }
@@ -41573,7 +41585,7 @@ pipeline {
                                 -e GOOS=linux \
                                 -e GOARCH=amd64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-cli-linux-amd64 ./src/client
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-cli-linux-amd64 ./src/client
                         '''
                     }
                 }
@@ -41591,7 +41603,7 @@ pipeline {
                                 -e GOOS=linux \
                                 -e GOARCH=arm64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-cli-linux-arm64 ./src/client
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-cli-linux-arm64 ./src/client
                         '''
                     }
                 }
@@ -41609,7 +41621,7 @@ pipeline {
                                 -e GOOS=darwin \
                                 -e GOARCH=amd64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-cli-darwin-amd64 ./src/client
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-cli-darwin-amd64 ./src/client
                         '''
                     }
                 }
@@ -41627,7 +41639,7 @@ pipeline {
                                 -e GOOS=darwin \
                                 -e GOARCH=arm64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-cli-darwin-arm64 ./src/client
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-cli-darwin-arm64 ./src/client
                         '''
                     }
                 }
@@ -41645,7 +41657,7 @@ pipeline {
                                 -e GOOS=windows \
                                 -e GOARCH=amd64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-cli-windows-amd64.exe ./src/client
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-cli-windows-amd64.exe ./src/client
                         '''
                     }
                 }
@@ -41663,7 +41675,7 @@ pipeline {
                                 -e GOOS=windows \
                                 -e GOARCH=arm64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-cli-windows-arm64.exe ./src/client
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-cli-windows-arm64.exe ./src/client
                         '''
                     }
                 }
@@ -41681,7 +41693,7 @@ pipeline {
                                 -e GOOS=freebsd \
                                 -e GOARCH=amd64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-cli-freebsd-amd64 ./src/client
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-cli-freebsd-amd64 ./src/client
                         '''
                     }
                 }
@@ -41699,7 +41711,7 @@ pipeline {
                                 -e GOOS=freebsd \
                                 -e GOARCH=arm64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-cli-freebsd-arm64 ./src/client
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-cli-freebsd-arm64 ./src/client
                         '''
                     }
                 }
@@ -41726,7 +41738,7 @@ pipeline {
                                 -e GOOS=linux \
                                 -e GOARCH=amd64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-agent-linux-amd64 ./src/agent
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-agent-linux-amd64 ./src/agent
                         '''
                     }
                 }
@@ -41744,7 +41756,7 @@ pipeline {
                                 -e GOOS=linux \
                                 -e GOARCH=arm64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-agent-linux-arm64 ./src/agent
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-agent-linux-arm64 ./src/agent
                         '''
                     }
                 }
@@ -41762,7 +41774,7 @@ pipeline {
                                 -e GOOS=darwin \
                                 -e GOARCH=amd64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-agent-darwin-amd64 ./src/agent
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-agent-darwin-amd64 ./src/agent
                         '''
                     }
                 }
@@ -41780,7 +41792,7 @@ pipeline {
                                 -e GOOS=darwin \
                                 -e GOARCH=arm64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-agent-darwin-arm64 ./src/agent
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-agent-darwin-arm64 ./src/agent
                         '''
                     }
                 }
@@ -41798,7 +41810,7 @@ pipeline {
                                 -e GOOS=windows \
                                 -e GOARCH=amd64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-agent-windows-amd64.exe ./src/agent
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-agent-windows-amd64.exe ./src/agent
                         '''
                     }
                 }
@@ -41816,7 +41828,7 @@ pipeline {
                                 -e GOOS=windows \
                                 -e GOARCH=arm64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-agent-windows-arm64.exe ./src/agent
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-agent-windows-arm64.exe ./src/agent
                         '''
                     }
                 }
@@ -41834,7 +41846,7 @@ pipeline {
                                 -e GOOS=freebsd \
                                 -e GOARCH=amd64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-agent-freebsd-amd64 ./src/agent
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-agent-freebsd-amd64 ./src/agent
                         '''
                     }
                 }
@@ -41852,7 +41864,7 @@ pipeline {
                                 -e GOOS=freebsd \
                                 -e GOARCH=arm64 \
                                 casjaysdev/go:latest \
-                                go build -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-agent-freebsd-arm64 ./src/agent
+                                go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${BINDIR}/${PROJECT_NAME}-agent-freebsd-arm64 ./src/agent
                         '''
                     }
                 }
@@ -42743,12 +42755,15 @@ test:
 
     - name: Run tests with coverage
       run: |
-        docker run --rm -it --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)" -v $(pwd):/app -w /app casjaysdev/go:latest \
+        # coverage.out goes to the mounted workspace (/app), not /tmp — two separate docker run
+        # invocations cannot share /tmp; the workspace mount is the only shared path between them.
+        # The runner workspace is ephemeral so this is safe.
+        docker run --rm -it --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)" -v $PWD:/app -w /app casjaysdev/go:latest \
           go test -cover -coverprofile=coverage.out ./...
 
     - name: Check coverage is >= 80%
       run: |
-        COVERAGE=$(docker run --rm -it --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)" -v $(pwd):/app -w /app casjaysdev/go:latest \
+        COVERAGE=$(docker run --rm -it --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)" -v $PWD:/app -w /app casjaysdev/go:latest \
           go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
         if [ $(echo "$COVERAGE < 80" | bc -l) -eq 1 ]; then
           echo "ERROR: Coverage is $COVERAGE%, must be >= 80%"
@@ -42925,7 +42940,7 @@ verify_all_endpoints_tested
 # 1. Build in Docker (always use Docker for builds)
 mkdir -p "${TMPDIR:-/tmp}/${PROJECT_ORG}"
 BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/${PROJECT_ORG}/${PROJECT_NAME}-XXXXXX")
-docker run --rm -it --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)" -v $(pwd):/app -w /app -e CGO_ENABLED=0 \
+docker run --rm -it --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)" -v $PWD:/app -w /app -e CGO_ENABLED=0 \
   casjaysdev/go:latest go build -o /app/binaries/{project_name} ./src
 
 # 2. Test (prefer Incus, fallback to Docker)
@@ -42943,7 +42958,7 @@ if command -v incus &>/dev/null; then
 else
   # FALLBACK: Quick test in Docker (alpine, no systemd)
   echo "Incus not available, testing with Docker..."
-  docker run --rm -it --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)" -v $(pwd)/binaries:/app alpine:latest \
+  docker run --rm -it --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)" -v $PWD/binaries:/app alpine:latest \
     /app/{project_name} --help
 fi
 ```
@@ -43018,7 +43033,7 @@ mkdir -p "$GO_CACHE" "$GO_BUILD"
 # Common docker run for Go builds
 GO_DOCKER="docker run --rm -it \
   --name \"${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)\" \
-  -v $(pwd):/app \
+  -v $PWD:/app \
   -v $GO_CACHE:/usr/local/share/go/pkg/mod \
   -v $GO_BUILD:/usr/local/share/go/cache \
   -w /app \
@@ -43268,7 +43283,7 @@ mkdir -p "$GO_CACHE" "$GO_BUILD"
 # Common docker run for Go builds
 GO_DOCKER="docker run --rm -it \
   --name \"${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)\" \
-  -v $(pwd):/app \
+  -v $PWD:/app \
   -v $GO_CACHE:/usr/local/share/go/pkg/mod \
   -v $GO_BUILD:/usr/local/share/go/cache \
   -w /app \
@@ -43817,14 +43832,14 @@ mkdir -p "$GO_CACHE" "$GO_BUILD"
 # Build (with caching)
 docker run --rm -it \
   --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)" \
-  -v $(pwd):/app \
+  -v $PWD:/app \
   -v $GO_CACHE:/usr/local/share/go/pkg/mod \
   -v $GO_BUILD:/usr/local/share/go/cache \
   -w /app -e CGO_ENABLED=0 \
   casjaysdev/go:latest go build -o /app/binaries/{project_name} ./src
 
 # Test in Docker (quick) - install tools first
-docker run --rm -it --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)" -v $(pwd)/binaries:/app alpine:latest sh -c "
+docker run --rm -it --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)" -v $PWD/binaries:/app alpine:latest sh -c "
   apk add --no-cache curl bash file jq >/dev/null
   /app/{project_name} --help
 "
@@ -43854,14 +43869,14 @@ mkdir -p $TEST_DIR/{config,data,logs}
 # Build to binaries/ (with caching)
 docker run --rm -it \
   --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)" \
-  -v $(pwd):/app \
+  -v $PWD:/app \
   -v $GO_CACHE:/usr/local/share/go/pkg/mod \
   -v $GO_BUILD:/usr/local/share/go/cache \
   -w /app -e CGO_ENABLED=0 \
   casjaysdev/go:latest go build -o /app/binaries/{project_name} ./src
 
 # Quick test in Docker (install tools first)
-docker run --rm -it --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)" -v $(pwd)/binaries:/app alpine:latest sh -c "
+docker run --rm -it --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)" -v $PWD/binaries:/app alpine:latest sh -c "
   apk add --no-cache curl bash file jq >/dev/null
   /app/{project_name} --help
   /app/{project_name} --version
@@ -43870,7 +43885,7 @@ docker run --rm -it --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | he
 # Full test with config/data in Docker
 docker run --rm -it \
   --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)" \
-  -v $(pwd)/binaries:/app \
+  -v $PWD/binaries:/app \
   -v $TEST_DIR:/test \
   alpine:latest /app/{project_name} \
     --config /test/config \
@@ -43892,7 +43907,7 @@ TEST_DIR=$(mktemp -d "${TMPDIR:-/tmp}/${PROJECT_ORG}/${PROJECT_NAME}-XXXXXX")
 mkdir -p $TEST_DIR/{config,data,logs}
 
 # Build
-docker run --rm -it --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)" -v $(pwd):/app -w /app -e CGO_ENABLED=0 \
+docker run --rm -it --name "${PROJECT_NAME}-$(tr -dc 'a-z0-9' </dev/urandom | head -c8)" -v $PWD:/app -w /app -e CGO_ENABLED=0 \
   casjaysdev/go:latest go build -o /app/binaries/{project_name} ./src
 
 # Launch Incus container (use latest Debian stable)
@@ -51271,7 +51286,7 @@ func GetBinaryName() string {
 **Build command (CI/CD injects version from git tag):**
 ```bash
 # VERSION comes from git tag (see PART 26/28 for version handling)
-go build -ldflags "-X main.ProjectName={project_name} -X main.Version=${VERSION}" -o {project_name}-cli ./src/client
+go build -buildvcs=false -ldflags "-X main.ProjectName={project_name} -X main.Version=${VERSION}" -o {project_name}-cli ./src/client
 ```
 
 ### Server-Side Client Detection
@@ -51616,7 +51631,7 @@ make build
 ```bash
 # CI/CD runs inside `casjaysdev/go:latest` (or uses `docker run ... casjaysdev/go:latest`), NOT `actions/setup-go`
 # See PART 28: CI/CD WORKFLOWS for complete examples
-go build -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli ./src/client
+go build -buildvcs=false -ldflags "${LDFLAGS}" -o ${PROJECT_NAME}-cli ./src/client
 ```
 
 ### Directory Structure
