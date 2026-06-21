@@ -1,134 +1,89 @@
-.PHONY: all build build-ui clean run dev test lint help
+PROJECTNAME := $(shell git remote get-url origin 2>/dev/null | sed -E 's|.*/([^/]+)(\.git)?$$|\1|' || basename "$$(pwd)")
+PROJECTORG  := $(shell git remote get-url origin 2>/dev/null | sed -E 's|.*/([^/]+)/[^/]+(\.git)?$$|\1|' || basename "$$(dirname "$$(pwd)")")
 
-# Build variables
-VERSION ?= 1.0.0
-BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
-GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-LDFLAGS := -s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME) -X main.gitCommit=$(GIT_COMMIT)
+VERSION    ?= $(shell cat release.txt 2>/dev/null || echo "devel")
+BUILD_DATE := $(shell date +"%a %b %d, %Y at %H:%M:%S %Z")
+COMMIT_ID  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "N/A")
+PLATFORMS  ?= linux/amd64,linux/arm64
 
-# Directories
-BUILD_DIR := build
-DIST_DIR := dist
-UI_DIR := ui
-UI_DIST_DIR := $(UI_DIR)/dist
+OFFICIAL_SITE ?= https://github.com/$(PROJECTORG)/$(PROJECTNAME)
 
-# Binary names
-BINARY_NAME := casreg
-BINARY_LINUX_AMD64 := $(BINARY_NAME)-linux-amd64
-BINARY_LINUX_ARM64 := $(BINARY_NAME)-linux-arm64
-BINARY_DARWIN_AMD64 := $(BINARY_NAME)-darwin-amd64
-BINARY_DARWIN_ARM64 := $(BINARY_NAME)-darwin-arm64
-BINARY_WINDOWS_AMD64 := $(BINARY_NAME)-windows-amd64.exe
+LDFLAGS := -s -w \
+	-X 'main.Version=$(VERSION)' \
+	-X 'main.CommitID=$(COMMIT_ID)' \
+	-X 'main.BuildDate=$(BUILD_DATE)' \
+	-X 'main.OfficialSite=$(OFFICIAL_SITE)'
 
-# Default target
-all: build
+BINDIR   := binaries
+RELDIR   := releases
+REGISTRY := ghcr.io/$(PROJECTORG)/$(PROJECTNAME)
 
-# Help target
-help:
-	@echo "casreg Build System"
-	@echo ""
-	@echo "Available targets:"
-	@echo "  all            - Build everything (default)"
-	@echo "  build          - Build server binary"
-	@echo "  build-ui       - Build UI assets"
-	@echo "  build-all      - Build for all platforms"
-	@echo "  clean          - Clean build artifacts"
-	@echo "  run            - Run the server"
-	@echo "  dev            - Run in development mode"
-	@echo "  test           - Run tests"
-	@echo "  lint           - Run linters"
-	@echo "  help           - Show this help message"
+GO_VOL ?= go-state
 
-# Build UI
-build-ui:
-	@echo "Building UI assets..."
-	@cd $(UI_DIR) && npm install && npm run build
-	@echo "UI build complete"
+GO_DOCKER := docker run --rm -it \
+	--name $(PROJECTNAME)-$$(tr -dc 'a-z0-9' </dev/urandom | head -c8) \
+	-v $(PWD):/app \
+	-v $(GO_VOL):/usr/local/share/go \
+	-w /app \
+	casjaysdev/go:latest
 
-# Build server
-build: build-ui
-	@echo "Building casreg server..."
-	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) .
-	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
+.PHONY: help build release docker test dev lint clean
 
-# Build for all platforms
-build-all: build-ui
-	@echo "Building for all platforms..."
-	@mkdir -p $(DIST_DIR)
+help: ## Show this help message
+	@printf '\n\033[1;37m  %s v%s\033[0m\n\n' "$(PROJECTNAME)" "$(VERSION)"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-38s\033[0m- %s\n", $$1, $$2}'
+	@printf '\n'
 
-	# Linux AMD64
-	@echo "Building for Linux AMD64..."
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_LINUX_AMD64) .
+build: ## Build binaries for all 8 platforms
+	@mkdir -p $(BINDIR)
+	$(GO_DOCKER) sh -c '\
+		CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINDIR)/$(PROJECTNAME)-linux-amd64 ./src && \
+		CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINDIR)/$(PROJECTNAME)-linux-arm64 ./src && \
+		CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINDIR)/$(PROJECTNAME)-darwin-amd64 ./src && \
+		CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINDIR)/$(PROJECTNAME)-darwin-arm64 ./src && \
+		CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINDIR)/$(PROJECTNAME)-windows-amd64.exe ./src && \
+		CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINDIR)/$(PROJECTNAME)-windows-arm64.exe ./src && \
+		CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINDIR)/$(PROJECTNAME)-freebsd-amd64 ./src && \
+		CGO_ENABLED=0 GOOS=freebsd GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINDIR)/$(PROJECTNAME)-freebsd-arm64 ./src'
 
-	# Linux ARM64
-	@echo "Building for Linux ARM64..."
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_LINUX_ARM64) .
+dev: ## Quick single-platform build into a temp dir
+	@mkdir -p "$${TMPDIR:-/tmp}/$(PROJECTORG)"
+	@BUILD_DIR=$$(mktemp -d "$${TMPDIR:-/tmp}/$(PROJECTORG)/$(PROJECTNAME)-XXXXXX") && \
+		echo "Building dev binary..." && \
+		docker run --rm -it \
+			--name $(PROJECTNAME)-$$(tr -dc 'a-z0-9' </dev/urandom | head -c8) \
+			-v $(PWD):/app \
+			-v $(GO_VOL):/usr/local/share/go \
+			-w /app \
+			casjaysdev/go:latest \
+			sh -c 'CGO_ENABLED=0 go build -o $$BUILD_DIR/$(PROJECTNAME) ./src' && \
+		echo "Built: $$BUILD_DIR/$(PROJECTNAME)"
 
-	# macOS AMD64
-	@echo "Building for macOS AMD64..."
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_DARWIN_AMD64) .
+test: ## Run vet and tests
+	$(GO_DOCKER) sh -c 'CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test -v -cover ./...'
 
-	# macOS ARM64
-	@echo "Building for macOS ARM64..."
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_DARWIN_ARM64) .
+lint: ## Run linter
+	$(GO_DOCKER) sh -c 'CGO_ENABLED=0 golangci-lint run ./...'
 
-	# Windows AMD64
-	@echo "Building for Windows AMD64..."
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_WINDOWS_AMD64) .
+docker: ## Build multi-arch Docker image locally
+	docker buildx build \
+		--platform $(PLATFORMS) \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT_ID=$(COMMIT_ID) \
+		--build-arg BUILD_DATE="$(BUILD_DATE)" \
+		-t $(REGISTRY):$(VERSION) \
+		-t $(REGISTRY):latest \
+		-f docker/Dockerfile .
 
-	@echo "Cross-compilation complete. Binaries in $(DIST_DIR)/"
+release: ## Prepare release archives
+	@mkdir -p $(RELDIR)
+	@$(MAKE) build
+	@for f in $(BINDIR)/$(PROJECTNAME)-*; do \
+		name=$$(basename $$f); \
+		tar -czf $(RELDIR)/$$name.tar.gz -C $(BINDIR) $$name; \
+	done
+	@echo "Release archives in $(RELDIR)/"
 
-# Clean build artifacts
-clean:
-	@echo "Cleaning build artifacts..."
-	@rm -rf $(BUILD_DIR) $(DIST_DIR) $(UI_DIST_DIR)
-	@go clean
-	@echo "Clean complete"
-
-# Run the server
-run: build
-	@echo "Starting casreg server..."
-	@$(BUILD_DIR)/$(BINARY_NAME) serve
-
-# Development mode (auto-reload would require additional tools)
-dev:
-	@echo "Starting development server..."
-	@go run . serve
-
-# Run tests
-test:
-	@echo "Running tests..."
-	@go test -v -race -coverprofile=coverage.out ./...
-	@go tool cover -func=coverage.out
-
-# Run linters
-lint:
-	@echo "Running linters..."
-	@golangci-lint run ./...
-	@cd $(UI_DIR) && npm run lint
-
-# Install dependencies
-deps:
-	@echo "Installing Go dependencies..."
-	@go mod download
-	@go mod tidy
-	@echo "Installing UI dependencies..."
-	@cd $(UI_DIR) && npm install
-
-# Generate documentation
-docs:
-	@echo "Generating API documentation..."
-	@swag init
-	@echo "Documentation generated"
-
-# Docker build
-docker-build:
-	@echo "Building Docker image..."
-	@docker build -t casreg:$(VERSION) -t casreg:latest .
-	@echo "Docker image built"
-
-# Docker run
-docker-run:
-	@echo "Running Docker container..."
-	@docker run -p 8080:8080 casreg:latest
+clean: ## Remove build artifacts
+	@rm -rf $(BINDIR) $(RELDIR)

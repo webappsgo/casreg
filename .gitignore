@@ -151,9 +151,8 @@ Session.vim
 *.pfx
 
 ### Build artifacts ###
-build/
-dist/
-out/
+binaries/
+releases/
 
 # Rust
 target/
