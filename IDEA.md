@@ -90,6 +90,8 @@ official_site: https://github.com/webappsgo/casreg
 - Org owner cannot remove themselves if they are the only owner
 - Deleting a registry requires explicit confirmation and cascades to all contained repositories, tags, and blobs
 - Robot accounts cannot be promoted to system roles under any circumstance
+- Tags are mutable pointers scoped to their own namespace and repository; overwriting `{userB}/alpine:latest` (including after a cross-namespace copy) only updates that tag record and never affects any tag in another namespace — a user can only modify tags they have write permission on
+- Blobs are immutable and content-addressed by SHA256 digest; ref_count tracks all references across all namespaces; a blob is only eligible for GC deletion when ref_count reaches zero — overwriting or deleting a tag in one namespace cannot cause blob deletion while any other namespace still holds a reference to that digest
 
 ### Data model & sensitivity
 
