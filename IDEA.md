@@ -45,8 +45,17 @@ official_site: https://github.com/webappsgo/casreg
 - SSO federation: OIDC/OAuth2 (GitHub, GitLab, Google, Entra ID), LDAP/Active Directory
 - Webhook delivery with HMAC-SHA256 payload signing
 - Immutable append-only audit log with JSON/CSV export
-- Integrated support ticket system and knowledge base
-- Per-repository issue tracking
+- Integrated support ticket system:
+  - Users open tickets with a title, description, priority (low/medium/high/critical), and category (technical, abuse-report, verification-request, other)
+  - Before submission the UI suggests relevant knowledge base articles to reduce duplicate tickets
+  - Statuses: open → in-progress → waiting-for-user → resolved → closed
+  - Threaded comments; email and in-app notifications on each update
+  - Admins and system-designated support staff can assign, re-categorise, and resolve tickets
+  - Verification request category: user provides a link to their official website, GitHub/GitLab org, or other identity proof; admin grants Verified Publisher status directly from the ticket view; ticket auto-closes with a confirmation note when verification is granted or denied
+  - Abuse report category: reporter may remain anonymous to the reported party; admin-only visibility on the reporter identity
+  - Tickets can be linked to a specific resource (registry, repository, org, user account)
+- Knowledge base: admin-authored articles in markdown, organised by category, publicly readable without login; search within KB; articles surface automatically in the ticket creation flow based on the ticket title
+- Per-repository issue tracker: title, body, labels (custom per repository), assignee, status (open/closed); threaded comments; label-based filtering and search; separate from the support ticket system — issue trackers are for the image maintainers' community, tickets are for casreg platform support
 - Management REST API (versioned, rate-limited, paginated)
 - Notification system: casreg extends the standard notification framework (SMTP, email templates, in-app inbox, and user preference controls defined in AI.md) with registry-specific event types — image pushed, scan completed with findings, quota at 80% and 100%, API token or robot account expiring within configurable lead time, replication rule failure, new support ticket comment; users control per-event whether to receive email or in-app notification only
 - Stars/favorites: users can star any public image (OCI or Incus); star count is a secondary popularity signal displayed on image detail pages and factored into Spotlight ranking
@@ -77,6 +86,7 @@ official_site: https://github.com/webappsgo/casreg
 
 **System roles (global):**
 - `admin` — full system control: user management, global config, audit logs, system-wide scan policies, push/promote to the global `library` registry, set the `is_pinned` editorial override on any public image (OCI or Incus), grant and revoke Verified Publisher status on any org or user, configure OIDC org → verified namespace mappings
+- `support` — can view, assign, comment on, and resolve all support tickets including verification-request and abuse-report categories; can see reporter identity on anonymous abuse reports; cannot access system config, user management, or scan policies
 - `user` — default for all accounts after the first; manages their own registries and orgs
 
 **Organization roles:**
@@ -135,7 +145,12 @@ official_site: https://github.com/webappsgo/casreg
 - `Signature` — id, manifest_digest, payload_type (cosign/notation), keyless (bool), cert_subject, rekor_log_id, verified_at
 - `AuditLog` — id, actor_type (user/robot/guest), actor_id, action, resource_type, resource_id, ip_addr, user_agent, created_at; append-only, no UPDATE/DELETE
 - `WebhookConfig` — id, owner_type, owner_id, url, hmac_secret_hash, events, active
-- `SupportTicket` — id, reporter_user_id, assignee_user_id, status, priority, title, body, created_at
+- `SupportTicket` — id, reporter_user_id, assignee_user_id, status (`open`/`in-progress`/`waiting-for-user`/`resolved`/`closed`), priority (`low`/`medium`/`high`/`critical`), category (`technical`/`abuse-report`/`verification-request`/`other`), title, body, resource_type, resource_id (nullable; links ticket to a registry/repo/org/user), anonymous_report (bool; hides reporter identity from non-admins), created_at, updated_at
+- `TicketComment` — id, ticket_id, author_user_id, body, created_at
+- `KBArticle` — id, category, title, body (markdown), author_user_id, published, created_at, updated_at
+- `Issue` — id, repository_id, author_user_id, assignee_user_id, title, body, status (`open`/`closed`), created_at, updated_at
+- `IssueComment` — id, issue_id, author_user_id, body, created_at
+- `IssueLabel` — id, repository_id, name, color, description
 - `ProxyCache` — id, name, upstream_url, upstream_auth_secret_ref, ttl_hours, last_synced_at
 - `ReplicationRule` — id, name, source (local or remote url), dest (local or remote url), filter_pattern, trigger (push/schedule), enabled
 - `Star` — id, user_id, resource_type (`oci_repo` or `incus_image`), resource_id, created_at; unique per (user_id, resource_type, resource_id)
