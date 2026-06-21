@@ -1,6 +1,6 @@
 ## Project description
 
-casreg is a self-hosted, public-first OCI container registry intended as a complete drop-in replacement for Docker Hub, GitHub Container Registry (GHCR), Quay.io, and GoHarbor. No account is required to browse, search, or pull public images — registration is only needed to push or manage private content. The platform delivers OCI-compliant image storage, supply-chain security (Trivy scanning, Cosign signing, SBOM generation, SLSA provenance), pull-through proxy caching, registry replication, robot/service accounts, SSO federation, and a comprehensive support system — all as a single self-contained binary with a server-side-rendered web UI and an interactive TUI CLI.
+casreg is a self-hosted, public-first image registry intended as a complete drop-in replacement for Docker Hub, GitHub Container Registry (GHCR), Quay.io, and GoHarbor — and as a self-hosted alternative to images.linuxcontainers.org for Incus images. No account is required to browse, search, or pull public images — registration is only needed to push or manage private content. The platform hosts both OCI/Docker images (via the Docker Registry V2 API) and Incus container/VM images (via the Incus REST API and simplestreams protocol), with supply-chain security (Trivy scanning, Cosign signing, SBOM generation, SLSA provenance), pull-through proxy caching, registry replication, robot/service accounts, SSO federation, and a comprehensive support system — all as a single self-contained binary with a server-side-rendered web UI and an interactive TUI CLI.
 
 ## Project variables
 
@@ -15,16 +15,22 @@ official_site: https://github.com/webappsgo/casreg
 ### Product scope & non-goals
 
 **In scope:**
-- Full Docker Registry HTTP API V2 (distribution spec) compliance at `/v2/`
+- Full Docker Registry HTTP API V2 (distribution spec) compliance
 - OCI Distribution Specification compliance including the OCI Referrers API
+- Incus REST API compliance (`/1.0/images`, `/1.0/operations`, `/1.0/` server info) for authenticated push and pull
+- Simplestreams protocol for anonymous public Incus image discovery and pull
 - Public-first anonymous browsing, searching, and pulling of public registries — no account required
-- Image push/pull with content-addressable, SHA256-verified blob storage
-- Supply-chain security: Trivy CVE scanning, Cosign signature verification, SBOM generation (Syft), SLSA provenance attestation
-- Pull-through proxy cache for upstream registries (Docker Hub, GHCR, Quay, gcr.io)
+- OCI image push/pull with content-addressable, SHA256-verified blob storage
+- Incus image push: `lxd.tar.xz` metadata and rootfs file pair received, metadata.yaml extracted automatically to populate os/release/variant/arch/type properties; images identified by combined SHA256 fingerprint
+- Both Incus image types: container (rootfs tarball or squashfs) and VM (disk image)
+- Incus image alias management: multiple aliases per image, resolved from property combinations (os/release/variant/arch/type)
+- Async operation model for Incus push: operation ID returned immediately, client polls for completion
+- Supply-chain security: Trivy CVE scanning (Incus container images supported; VM disk images excluded — see non-goals), Cosign signature verification, SBOM generation (Syft), SLSA provenance attestation
+- Pull-through proxy cache for upstream OCI registries (Docker Hub, GHCR, Quay, gcr.io)
 - Registry-to-registry replication (push/pull sync)
 - Multi-database support: SQLite (default), PostgreSQL, MySQL/MariaDB, MSSQL, MongoDB
 - Multi-storage backend: local filesystem (default), S3-compatible, NFS
-- Organizational hierarchy: users → organizations → registries → repositories
+- Organizational hierarchy: users → organizations → registries → repositories; a registry is typed as either OCI or Incus — the same org/namespace tree, same visibility and access control, same quota system
 - Robot/service accounts for CI/CD automation
 - SSO federation: OIDC/OAuth2 (GitHub, GitLab, Google, Entra ID), LDAP/Active Directory
 - Webhook delivery with HMAC-SHA256 payload signing
@@ -36,11 +42,14 @@ official_site: https://github.com/webappsgo/casreg
 
 **Non-goals (explicit):**
 - Docker Registry V1 protocol — deprecated since Docker 1.6 (2015), removed from Docker Hub, no modern client uses it; implementing it would be a security liability with zero real users
+- LXD protocol support — Incus is the actively maintained fork; LXD reached end-of-life for community support
+- Incus VM disk image scanning — scanning a VM disk image (`.qcow2`, `.img`) requires mounting the filesystem, which needs kernel privileges incompatible with a static binary deployment; container rootfs tarballs are scanned normally
 - Client-side rendering — web UI is server-rendered; no JavaScript framework required
 - Native mobile apps
 - Built-in CI/CD pipeline execution (use webhooks to trigger external CI)
 - Image build service (casreg stores and serves images; building them is out of scope)
 - Helm chart repository (OCI-based Helm is in scope as it uses the same V2 API)
+- Incus cluster federation or instance-to-instance live migration
 
 ### Roles & permissions
 
@@ -87,11 +96,14 @@ official_site: https://github.com/webappsgo/casreg
 **Core entities:**
 - `User` — id, username, email (unique), bcrypt_password_hash, role, locked_until, passkey_credentials, 2fa_method, created_at
 - `Organization` — id, name (unique), visibility, owner_user_id, quota_bytes, created_at
-- `Registry` — id, org_id (nullable for personal), name, visibility, immutable_tags, retention_policy, scan_policy, created_at
+- `Registry` — id, org_id (nullable for personal), name, image_type (`oci` or `incus`), visibility, immutable_tags, retention_policy, scan_policy, created_at
 - `Repository` — id, registry_id, name, visibility (≤ parent), description, created_at
 - `Tag` — id, repository_id, name, manifest_digest, pushed_by, pushed_at, immutable
 - `Manifest` — id, repository_id, digest (sha256:…), media_type, size_bytes, config_digest, created_at
 - `Blob` — digest (PK), size_bytes, stored_at, ref_count (for deduplication GC)
+- `IncusImage` — id, registry_id, fingerprint (SHA256 of combined metadata+rootfs files, unique per registry), os, release, variant, arch, image_type (`container` or `vm`), metadata_size_bytes, rootfs_size_bytes, pushed_by, pushed_at
+- `IncusAlias` — id, incus_image_id, name (alias string e.g. `oracle/7/default`), description
+- `IncusOperation` — id, uuid (unique), operation_type, status (`running`/`success`/`failure`), error, created_at, updated_at; short-lived, pruned after 24 hours
 - `Token` — id, user_id, name, hashed_value, scopes, expires_at, last_used_at
 - `RobotAccount` — id, owner_type (user/org), owner_id, name, hashed_token, scopes, expires_at
 - `ScanResult` — id, manifest_digest, scanner_version, db_version, scanned_at, vulnerabilities (JSONB), sbom_spdx (JSONB), sbom_cyclonedx (JSONB), secrets_found (bool)
@@ -117,6 +129,8 @@ official_site: https://github.com/webappsgo/casreg
 - Upstream pull-through registry responses — content verified by digest before serving to clients; TLS certs required
 - Webhook endpoint URLs — SSRF-checked against a blocklist of internal IP ranges before delivery
 - OIDC/OAuth2 authorization codes and access tokens from external providers — validated but treated as untrusted input until signature is verified
+- `lxd.tar.xz` content pushed by any user — treated as an untrusted archive; only `metadata.yaml` is extracted; all template path entries are validated against path traversal before any file operation; archive is never executed
+- `metadata.yaml` field values (os, release, variant, arch, type) — stored as opaque strings, length-limited, never interpolated into queries, commands, or file paths
 
 **External service failure modes:**
 
@@ -181,6 +195,9 @@ official_site: https://github.com/webappsgo/casreg
 | Forged HMAC on webhooks | Outgoing webhooks signed with HMAC-SHA256 using a per-hook secret; receivers advised to verify |
 | JWT secret compromise | JWT secret is auto-generated on first run if not set; minimum 256 bits enforced; never logged |
 | Replay of API tokens | Tokens are stored hashed (SHA256); raw value shown only once at creation; no plaintext ever persisted |
+| Tar-slip via malicious lxd.tar.xz | Template path entries inside lxd.tar.xz validated against path traversal (no `..` components, no absolute paths) before extraction; metadata.yaml extracted to memory only, never written to a user-controlled path |
+| Large VM image upload exhausting storage | Per-user and per-org quota limits enforced before accepting any Incus image upload; push rejected if remaining quota would be exceeded |
+| Malicious rootfs tarball | Incus container rootfs tarballs scanned by Trivy on push; configurable CVE severity gate can block finalization; rootfs bytes stored opaquely and never executed by casreg |
 
 ### Security decisions & exceptions
 
@@ -193,3 +210,6 @@ official_site: https://github.com/webappsgo/casreg
 - **SSRF protection applies to all outbound connections casreg initiates** — pull-through upstream URLs, webhook delivery targets, and OIDC discovery endpoints are all checked against an internal-IP blocklist before connection. The blocklist includes RFC 1918, loopback, link-local (169.254/16), and the AWS metadata endpoint (169.254.169.254).
 - **Passkey/WebAuthn is optional and admin-toggleable** — organizations that require FIDO2 can enforce it; those with hardware constraints can disable it. This is a UX tradeoff, not a security downgrade, because password + token auth is still available.
 - **Replication and pull-through always verify TLS** — no option to skip certificate verification; operators who need self-signed certs on upstream registries must add the CA to the system trust store.
+- **VM disk image scanning is excluded** — scanning a VM disk image (`.qcow2`, `.img`, `.vhd`) requires mounting the filesystem, which demands kernel-level privileges incompatible with a static binary deployed in an unprivileged container. Incus container rootfs tarballs are scanned normally by Trivy.
+- **Incus metadata is stored, never interpolated** — os, release, variant, arch, and type values extracted from `metadata.yaml` are stored as opaque database strings and displayed verbatim in the UI; they are never used to construct file paths, shell commands, or database queries.
+- **Template entries in lxd.tar.xz are path-traversal-validated** — the Incus image format allows template files inside the metadata archive; every path entry is checked for `..` components and absolute prefixes before any extraction; violating entries cause the push to be rejected with a descriptive error.
